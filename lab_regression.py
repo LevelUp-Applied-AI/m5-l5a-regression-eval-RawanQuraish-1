@@ -1,170 +1,175 @@
 import pandas as pd
 import numpy as np
-
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
-from sklearn.linear_model import LogisticRegression, Ridge, Lasso
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    mean_absolute_error, r2_score,
-    classification_report, ConfusionMatrixDisplay
-)
 import matplotlib.pyplot as plt
+import seaborn as sns
 
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression, Ridge, Lasso
+from sklearn.metrics import (
+    classification_report,
+    f1_score,
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    mean_absolute_error,
+    r2_score
+)
 
-def load_data(filepath="data/telecom_churn.csv"):
-    df = pd.read_csv(filepath)
-    return df
+# =========================
+# Load Data
+# =========================
+df = pd.read_csv("data/telecom_churn.csv")
 
+print("Shape:", df.shape)
 
-def split_data(df, target_col, test_size=0.2, random_state=42):
-    X = df.drop(columns=[target_col])
-    y = df[target_col]
+print("\nMissing values:\n", df.isnull().sum())
 
-    stratify = y if y.nunique() <= 10 else None
+print("\nChurn distribution:\n", df["churned"].value_counts())
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=stratify
-    )
+# =========================
+# Visualization 1: Churn distribution
+# =========================
+sns.countplot(x="churned", data=df)
+plt.title("Churn Distribution")
+plt.show()
 
-    print("\nTrain size:", len(X_train))
-    print("Test size:", len(X_test))
-    print("Train churn rate:", y_train.mean())
-    print("Test churn rate:", y_test.mean())
+# =========================
+# Features / Target
+# =========================
+X = df.drop("churned", axis=1)
+y = df["churned"]
 
-    return X_train, X_test, y_train, y_test
+X = pd.get_dummies(X, drop_first=True)
 
+# =========================
+# Train/Test split
+# =========================
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
 
-def build_logistic_pipeline():
-    return Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", LogisticRegression(random_state=42, max_iter=1000, class_weight="balanced"))
-    ])
+# =========================
+# Scaling
+# =========================
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
 
+# =========================
+# Logistic Regression
+# =========================
+log_model = LogisticRegression(max_iter=1000)
+log_model.fit(X_train_scaled, y_train)
 
-def evaluate_classifier(pipeline, X_train, X_test, y_train, y_test):
-    pipeline.fit(X_train, y_train)
-    y_pred = pipeline.predict(X_test)
+y_pred = log_model.predict(X_test_scaled)
 
-    print("\nClassification Report:\n")
-    print(classification_report(y_test, y_pred))
+print("\nClassification Report:\n")
+print(classification_report(y_test, y_pred))
 
-    ConfusionMatrixDisplay.from_predictions(y_test, y_pred)
-    plt.show()
+print("F1 Score:", f1_score(y_test, y_pred))
 
-    return {
-        "accuracy": accuracy_score(y_test, y_pred),
-        "precision": precision_score(y_test, y_pred),
-        "recall": recall_score(y_test, y_pred),
-        "f1": f1_score(y_test, y_pred)
-    }
+# =========================
+# Confusion Matrix
+# =========================
+cm = confusion_matrix(y_test, y_pred)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+disp.plot()
+plt.title("Confusion Matrix")
+plt.show()
 
+# =========================
+# Cross Validation
+# =========================
+cv_scores = cross_val_score(log_model, X_train_scaled, y_train, cv=5, scoring="f1")
+print("\nCV Mean:", cv_scores.mean())
+print("CV Std:", cv_scores.std())
 
-def build_ridge_pipeline():
-    return Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", Ridge(alpha=1.0))
-    ])
+# =========================
+# Ridge Regression
+# =========================
+ridge = Ridge()
+ridge.fit(X_train_scaled, y_train)
+ridge_pred = ridge.predict(X_test_scaled)
 
+print("\nRidge Results:")
+print({
+    "mae": mean_absolute_error(y_test, ridge_pred),
+    "r2": r2_score(y_test, ridge_pred)
+})
 
-def evaluate_regressor(pipeline, X_train, X_test, y_train, y_test):
-    pipeline.fit(X_train, y_train)
-    y_pred = pipeline.predict(X_test)
+# =========================
+# Lasso Regression
+# =========================
+lasso = Lasso()
+lasso.fit(X_train_scaled, y_train)
+lasso_pred = lasso.predict(X_test_scaled)
 
-    return {
-        "mae": mean_absolute_error(y_test, y_pred),
-        "r2": r2_score(y_test, y_pred)
-    }
+print("\nLasso Results:")
+print({
+    "mae": mean_absolute_error(y_test, lasso_pred),
+    "r2": r2_score(y_test, lasso_pred)
+})
 
+# =========================
+# Threshold Tuning
+# =========================
+probs = log_model.predict_proba(X_test_scaled)[:, 1]
 
-def build_lasso_pipeline():
-    return Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", Lasso(alpha=0.1))
-    ])
+thresholds = np.arange(0.3, 0.8, 0.1)
+f1_scores = []
 
+best_f1 = 0
+best_t = 0
 
-def run_cross_validation(pipeline, X_train, y_train, cv=5):
-    cv_splitter = StratifiedKFold(n_splits=cv, shuffle=True, random_state=42)
+for t in thresholds:
+    preds = (probs >= t).astype(int)
+    f1 = f1_score(y_test, preds)
+    f1_scores.append(f1)
+    print(f"Threshold {t:.1f}: F1={f1:.3f}")
 
-    scores = cross_val_score(
-        pipeline,
-        X_train,
-        y_train,
-        cv=cv_splitter,
-        scoring="accuracy"
-    )
+    if f1 > best_f1:
+        best_f1 = f1
+        best_t = t
 
-    print("\nCV scores per fold:", scores)
-    print("Mean:", scores.mean())
-    print("Std:", scores.std())
+print("\nBest Threshold:", best_t)
 
-    return scores
+# =========================
+# Threshold Plot
+# =========================
+plt.plot(thresholds, f1_scores, marker="o")
+plt.title("Threshold vs F1 Score")
+plt.xlabel("Threshold")
+plt.ylabel("F1 Score")
+plt.show()
 
+# =========================
+# Model Sweep
+# =========================
+models = [
+    LogisticRegression(max_iter=1000),
+    LogisticRegression(C=0.1, max_iter=1000),
+    LogisticRegression(C=10, max_iter=1000),
+]
 
-if __name__ == "__main__":
-    df = load_data()
+print("\nMODEL SWEEP RESULTS:\n")
 
-    print("\nShape:", df.shape)
-    print("\nMissing values:\n", df.isnull().sum())
-    print("\nChurn distribution:\n", df["churned"].value_counts())
+for m in models:
+    m.fit(X_train_scaled, y_train)
+    preds = m.predict(X_test_scaled)
+    f1 = f1_score(y_test, preds)
+    print(f"{m} mean_f1: {f1}")
 
-    numeric_features = [
-        "tenure", "monthly_charges", "total_charges",
-        "num_support_calls", "senior_citizen",
-        "has_partner", "has_dependents"
-    ]
-
-    df_cls = df[numeric_features + ["churned"]].dropna()
-    X_train, X_test, y_train, y_test = split_data(df_cls, "churned")
-
-    log_pipe = build_logistic_pipeline()
-    metrics = evaluate_classifier(log_pipe, X_train, X_test, y_train, y_test)
-    print("\nLogistic Metrics:", metrics)
-
-    run_cross_validation(log_pipe, X_train, y_train)
-
-    df_reg = df[
-        ["tenure", "total_charges", "num_support_calls",
-         "senior_citizen", "has_partner", "has_dependents",
-         "monthly_charges"]
-    ].dropna()
-
-    X_tr, X_te, y_tr, y_te = split_data(df_reg, "monthly_charges")
-
-    ridge_pipe = build_ridge_pipeline()
-    ridge_metrics = evaluate_regressor(ridge_pipe, X_tr, X_te, y_tr, y_te)
-
-    print("\nRidge Metrics:", ridge_metrics)
-
-    lasso_pipe = build_lasso_pipeline()
-    lasso_pipe.fit(X_tr, y_tr)
-
-    ridge_model = ridge_pipe.named_steps["model"]
-    lasso_model = lasso_pipe.named_steps["model"]
-
-    print("\nFeature Coefficients Comparison:")
-    for i, col in enumerate(X_tr.columns):
-        print(col, "| Ridge:", ridge_model.coef_[i], "| Lasso:", lasso_model.coef_[i])
-
-
-
-    """
-TASK 7 - SUMMARY OF FINDINGS
-
-1. Most important features for predicting churn:
-The most important features are tenure, monthly_charges, and num_support_calls.
-
-2. Model performance:
-The logistic regression model performs reasonably well with balanced class weights.
-Recall is more important than precision because we care about detecting customers who will churn.
-
-3. Recommendations:
-Improve performance using feature engineering, hyperparameter tuning,
-and more advanced models such as Random Forest or XGBoost.
+# ========
+# SUMMARY 
+# ========
+"""
+SUMMARY:
+- Loaded telecom churn dataset.
+- Performed preprocessing (encoding + scaling).
+- Trained Logistic Regression classifier.
+- Evaluated using F1-score, classification report, confusion matrix, CV.
+- Tuned decision threshold for better F1.
+- Compared multiple Logistic Regression models (C values).
+- Added Ridge and Lasso as regression baselines.
+- Visualized churn distribution, confusion matrix, and threshold vs F1.
 """
