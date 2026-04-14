@@ -1,0 +1,10 @@
+{
+  "models": [
+    {"type": "logistic", "C": 0.1, "solver": "liblinear"},
+    {"type": "logistic", "C": 1.0, "solver": "liblinear"},
+    {"type": "logistic", "C": 10.0, "solver": "liblinear"},
+    {"type": "ridge", "alpha": 0.1},
+    {"type": "ridge", "alpha": 1.0},
+    {"type": "lasso", "alpha": 0.1}
+  ]
+}
